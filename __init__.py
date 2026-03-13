@@ -1,7 +1,6 @@
 # __init__.py for ComfyUI-PandaNodes
 
-from .image_size import PandaImageSize
-from .storage import PandaGetImageSize
+from .image_size import PandaImageSize, PandaGetImageSize
 
 # Register all nodes
 NODE_CLASS_MAPPINGS = {
