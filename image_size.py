@@ -22,8 +22,8 @@ class PandaImageSize:
             }
         }
 
-    RETURN_TYPES = ("INT", "INT", "STRING")
-    RETURN_NAMES = ("width", "height", "info")
+    RETURN_TYPES = ("INT", "INT", "STRING", "PANDA_IMAGE_SIZE")
+    RETURN_NAMES = ("width", "height", "info", "config")
     FUNCTION = "calculate_size"
     CATEGORY = "PandaNodes/Image"
 
@@ -51,4 +51,14 @@ class PandaImageSize:
             final_height = round_to_align(final_width * h_ratio / w_ratio, align)
 
         info = f"{final_width}x{final_height} | {aspect_ratio} | align:{align}"
-        return final_width, final_height, info
+
+        # 创建配置对象
+        config = {
+            "width": final_width,
+            "height": final_height,
+            "aspect_ratio": aspect_ratio,
+            "align": align,
+            "info": info,
+        }
+
+        return final_width, final_height, info, config
