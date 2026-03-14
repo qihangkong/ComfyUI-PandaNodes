@@ -16,6 +16,48 @@ function showAlert(message) {
     });
 }
 
+// Get unique field name to avoid duplicates
+function getUniqueFieldName(node, currentIndex, preferredName) {
+    let uniqueName = preferredName;
+    let tries = 0;
+
+    while (node.inputs.some((input, index) =>
+        index !== currentIndex && input.name === uniqueName && input.name !== 'unused'
+    )) {
+        uniqueName = `${preferredName}_${tries}`;
+        tries++;
+    }
+
+    return uniqueName;
+}
+
+// Update field name with duplicate checking
+function updateFieldName(node, inputIndex, oldName, newName, widget) {
+    const preferredName = newName.trim() || `field_${inputIndex + 1}`;
+
+    if (preferredName !== oldName) {
+        const uniqueName = getUniqueFieldName(node, inputIndex, preferredName);
+
+        // Update input name
+        node.inputs[inputIndex].name = uniqueName;
+
+        // Update properties
+        if (node.properties.fields && node.properties.fields[oldName]) {
+            const oldType = node.properties.fields[oldName];
+            delete node.properties.fields[oldName];
+            node.properties.fields[uniqueName] = oldType;
+        }
+
+        // Update widget value to show actual name (including _n suffix)
+        if (widget && widget.value !== uniqueName) {
+            widget.value = uniqueName;
+        }
+
+        node.update();
+        node.size = node.computeSize();
+    }
+}
+
 app.registerExtension({
     name: "MultiSetNode",
     registerCustomNodes() {
@@ -158,22 +200,7 @@ app.registerExtension({
                         const inputIndex = widgetIndex - 3;
                         if (inputIndex >= 0 && inputIndex < node.inputs.length) {
                             const oldName = node.inputs[inputIndex].name;
-                            const newName = value.trim() || `field_${inputIndex + 1}`;
-
-                            if (newName !== oldName) {
-                                // Update input name
-                                node.inputs[inputIndex].name = newName;
-
-                                // Update properties
-                                if (node.properties.fields && node.properties.fields[oldName]) {
-                                    const oldType = node.properties.fields[oldName];
-                                    delete node.properties.fields[oldName];
-                                    node.properties.fields[newName] = oldType;
-                                }
-
-                                node.update();
-                                node.size = node.computeSize();
-                            }
+                            updateFieldName(node, inputIndex, oldName, value, fieldWidget);
                         }
                     },
                     {}
@@ -261,20 +288,7 @@ app.registerExtension({
                             const inputIndex = widgetIndex - 3;
                             if (inputIndex >= 0 && inputIndex < node.inputs.length) {
                                 const oldName = node.inputs[inputIndex].name;
-                                const newName = value.trim() || `field_${inputIndex + 1}`;
-
-                                if (newName !== oldName) {
-                                    node.inputs[inputIndex].name = newName;
-
-                                    if (node.properties.fields && node.properties.fields[oldName]) {
-                                        const oldType = node.properties.fields[oldName];
-                                        delete node.properties.fields[oldName];
-                                        node.properties.fields[newName] = oldType;
-                                    }
-
-                                    node.update();
-                                    node.size = node.computeSize();
-                                }
+                                updateFieldName(node, inputIndex, oldName, value, fieldWidget);
                             }
                         },
                         {}
@@ -294,20 +308,7 @@ app.registerExtension({
                             const inputIndex = widgetIndex - 3;
                             if (inputIndex >= 0 && inputIndex < node.inputs.length) {
                                 const oldName = node.inputs[inputIndex].name;
-                                const newName = value.trim() || `field_${inputIndex + 1}`;
-
-                                if (newName !== oldName) {
-                                    node.inputs[inputIndex].name = newName;
-
-                                    if (node.properties.fields && node.properties.fields[oldName]) {
-                                        const oldType = node.properties.fields[oldName];
-                                        delete node.properties.fields[oldName];
-                                        node.properties.fields[newName] = oldType;
-                                    }
-
-                                    node.update();
-                                    node.size = node.computeSize();
-                                }
+                                updateFieldName(node, inputIndex, oldName, value, fieldWidget);
                             }
                         },
                         {}
