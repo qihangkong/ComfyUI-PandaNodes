@@ -6,7 +6,6 @@ console.log("[PandaNodes] MultiSet/Get nodes loading...");
 // MultiSetNode and MultiGetNode - Support multiple variables in one node
 // Based on KJNodes SetNode/GetNode but extended for multi-value support
 
-
 function showAlert(message) {
     app.extensionManager.toast.add({
         severity: 'warn',
@@ -17,12 +16,12 @@ function showAlert(message) {
 }
 
 // Get unique field name to avoid duplicates
-function getUniqueFieldName(node, currentIndex, preferredName) {
+function getUniqueFieldName(node, currentId, preferredName) {
     let uniqueName = preferredName;
     let tries = 0;
 
-    while (node.inputs.some((input, index) =>
-        index !== currentIndex && input.name === uniqueName && input.name !== 'unused'
+    while (node.inputs.some((input) =>
+        input._fieldId !== currentId && input.name === uniqueName && input.name !== 'unused'
     )) {
         uniqueName = `${preferredName}_${tries}`;
         tries++;
@@ -36,16 +35,15 @@ function updateFieldName(node, inputIndex, oldName, newName, widget) {
     const preferredName = newName.trim() || `field_${inputIndex + 1}`;
 
     if (preferredName !== oldName) {
-        const uniqueName = getUniqueFieldName(node, inputIndex, preferredName);
+        const uniqueName = getUniqueFieldName(node, node.inputs[inputIndex]._fieldId, preferredName);
 
-        // Update input name
+        // Update input name (display only)
         node.inputs[inputIndex].name = uniqueName;
 
-        // Update properties
-        if (node.properties.fields && node.properties.fields[oldName]) {
-            const oldType = node.properties.fields[oldName];
-            delete node.properties.fields[oldName];
-            node.properties.fields[uniqueName] = oldType;
+        // Update properties - using internal ID for storage
+        if (node.properties.fields && node.properties.fields[node.inputs[inputIndex]._fieldId]) {
+            const fieldData = node.properties.fields[node.inputs[inputIndex]._fieldId];
+            fieldData.name = uniqueName;
         }
 
         // Update widget value to show actual name (including _n suffix)
@@ -73,7 +71,7 @@ app.registerExtension({
                 if (!this.properties) {
                     this.properties = {
                         "previousName": "",
-                        "fields": {} // Store field names and types: { field1: "INT", field2: "FLOAT" }
+                        "fields": {} // Store field data by internal ID: { id1: { name: "field1", type: "INT" }, id2: { name: "field2", type: "FLOAT" } }
                     };
                 }
 
@@ -134,12 +132,11 @@ app.registerExtension({
                 ) {
                     // Handle disconnect
                     if (slotType == 1 && !isChangeConnect) {
-                        const fieldName = this.inputs[slot].name;
-                        if (fieldName && node.properties.fields && node.properties.fields[fieldName]) {
-                            delete node.properties.fields[fieldName];
+                        const fieldId = this.inputs[slot]._fieldId;
+                        if (fieldId && node.properties.fields && node.properties.fields[fieldId]) {
+                            node.properties.fields[fieldId].type = '*';
                         }
                         this.inputs[slot].type = '*';
-                        this.inputs[slot].name = 'unused';
                     }
 
                     // Handle connect
@@ -148,23 +145,26 @@ app.registerExtension({
                         const type = (resolve?.subgraphInput ?? resolve?.output)?.type;
                         if (type) {
                             // Update input slot
-                            const fieldName = this.inputs[slot].name;
-                            if (fieldName !== '*') {
-                                this.inputs[slot].type = type;
-                                this.inputs[slot].name = fieldName;
+                            const fieldId = this.inputs[slot]._fieldId;
+                            this.inputs[slot].type = type;
 
-                                // Store field type
-                                if (!node.properties.fields) {
-                                    node.properties.fields = {};
-                                }
-                                node.properties.fields[fieldName] = type;
-
-                                // Update title based on first connected field if group name is empty
-                                if (node.widgets[0].value === '' && slot === 0) {
-                                    node.title = "Set_" + type;
-                                }
+                            // Store field type - using internal ID
+                            if (!node.properties.fields) {
+                                node.properties.fields = {};
+                            }
+                            if (!node.properties.fields[fieldId]) {
+                                const fieldNum = Object.keys(node.properties.fields).length + 1;
+                                node.properties.fields[fieldId] = {
+                                    name: `field_${fieldNum}`,
+                                    type: type
+                                };
                             } else {
-                                showAlert(`Slot ${slot} has invalid field name`);
+                                node.properties.fields[fieldId].type = type;
+                            }
+
+                            // Update title based on first connected field if group name is empty
+                            if (node.widgets[0].value === '' && slot === 0) {
+                                node.title = "Set_" + type;
                             }
                         } else {
                             showAlert(`node ${this.title} input undefined.`);
@@ -178,25 +178,39 @@ app.registerExtension({
             }
 
             addField() {
-                const fieldNum = this.inputs.filter(inp => inp.name !== 'unused').length;
-                const fieldName = `field_${fieldNum + 1}`;
-                this.addInput(fieldName, '*');
-
+                const fieldId = `field_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`; // Unique internal ID
+                // 确保properties和fields属性已初始化
+                if (!this.properties) {
+                    this.properties = {
+                        previousName: "",
+                        fields: {}
+                    };
+                }
                 if (!this.properties.fields) {
                     this.properties.fields = {};
                 }
-                this.properties.fields[fieldName] = '*';
+
+                const fieldNum = Object.keys(this.properties.fields).length + 1;
+                const fieldName = `field_${fieldNum}`;
+
+                this.addInput(fieldName, '*');
+                const newInputIndex = this.inputs.length - 1;
+                this.inputs[newInputIndex]._fieldId = fieldId;
+
+                // Store field data with internal ID
+                this.properties.fields[fieldId] = {
+                    name: fieldName,
+                    type: '*'
+                };
 
                 // Add text widget for field name
                 const node = this;
                 const fieldWidget = this.addWidget(
                     "text",
-                    `Field ${fieldNum + 1}`,
+                    `Field ${fieldNum}`,
                     fieldName,
                     (value) => {
                         const widgetIndex = node.widgets.indexOf(fieldWidget);
-                        // Calculate input index: widgets[0] is group name, widgets[1-2] are buttons
-                        // So widgets starting from index 3 are field names
                         const inputIndex = widgetIndex - 3;
                         if (inputIndex >= 0 && inputIndex < node.inputs.length) {
                             const oldName = node.inputs[inputIndex].name;
@@ -215,9 +229,9 @@ app.registerExtension({
                     // Find last non-'unused' input
                     for (let i = this.inputs.length - 1; i >= 0; i--) {
                         if (this.inputs[i].name !== 'unused') {
-                            const fieldName = this.inputs[i].name;
-                            if (this.properties.fields && this.properties.fields[fieldName]) {
-                                delete this.properties.fields[fieldName];
+                            const fieldId = this.inputs[i]._fieldId;
+                            if (this.properties.fields && this.properties.fields[fieldId]) {
+                                delete this.properties.fields[fieldId];
                             }
                             this.removeInput(i);
                             break;
@@ -273,16 +287,18 @@ app.registerExtension({
                 }
 
                 // Re-add fields with widgets
-                const fieldNames = Object.keys(cloned.properties.fields || {});
-                fieldNames.forEach((name, index) => {
-                    cloned.addInput(name, cloned.properties.fields[name]);
+                Object.keys(cloned.properties.fields || {}).forEach((fieldId, index) => {
+                    const fieldData = cloned.properties.fields[fieldId];
+                    cloned.addInput(fieldData.name, fieldData.type);
+                    const newInputIndex = cloned.inputs.length - 1;
+                    cloned.inputs[newInputIndex]._fieldId = fieldId;
 
                     // Add text widget for field name
                     const node = cloned;
                     const fieldWidget = cloned.addWidget(
                         "text",
                         `Field ${index + 1}`,
-                        name,
+                        fieldData.name,
                         (value) => {
                             const widgetIndex = node.widgets.indexOf(fieldWidget);
                             const inputIndex = widgetIndex - 3;
@@ -295,24 +311,8 @@ app.registerExtension({
                     );
                 });
 
-                if (fieldNames.length === 0) {
-                    cloned.addInput('field_1', '*');
-
-                    const node = cloned;
-                    const fieldWidget = cloned.addWidget(
-                        "text",
-                        "Field 1",
-                        'field_1',
-                        (value) => {
-                            const widgetIndex = node.widgets.indexOf(fieldWidget);
-                            const inputIndex = widgetIndex - 3;
-                            if (inputIndex >= 0 && inputIndex < node.inputs.length) {
-                                const oldName = node.inputs[inputIndex].name;
-                                updateFieldName(node, inputIndex, oldName, value, fieldWidget);
-                            }
-                        },
-                        {}
-                    );
+                if (Object.keys(cloned.properties.fields || {}).length === 0) {
+                    cloned.addField();
                 }
 
                 return cloned;
@@ -325,6 +325,17 @@ app.registerExtension({
             update() {
                 if (!this.graph) {
                     return;
+                }
+
+                // Ensure properties and fields exist
+                if (!this.properties) {
+                    this.properties = {
+                        previousName: "",
+                        fields: {}
+                    };
+                }
+                if (!this.properties.fields) {
+                    this.properties.fields = {};
                 }
 
                 // Update all getters with current field configuration
@@ -354,13 +365,14 @@ app.registerExtension({
             }
 
             getFields() {
-                // Get current field names and types from inputs
+                // Get current field names and types from properties
                 const fields = {};
-                this.inputs.forEach(input => {
-                    if (input.name !== 'unused' && input.type !== '*') {
-                        fields[input.name] = input.type;
-                    }
-                });
+                if (this.properties && this.properties.fields) {
+                    Object.keys(this.properties.fields).forEach(fieldId => {
+                        const fieldData = this.properties.fields[fieldId];
+                        fields[fieldData.name] = fieldData.type;
+                    });
+                }
                 return fields;
             }
 
@@ -533,7 +545,7 @@ app.registerExtension({
                 const setter = this.findSetter(this.graph);
                 if (setter) {
                     this.title = "Get_" + setter.widgets[0].value;
-                    this.updateFields(setter.properties.fields || {});
+                    this.updateFields(setter.properties.fields);
                 } else {
                     this.title = "Multi Get";
                     this.clearOutputs();
@@ -542,15 +554,16 @@ app.registerExtension({
 
             updateFields(fields) {
                 // Store current outputs before clearing
-                const fieldNames = Object.keys(fields || {});
+                // fields is a map of internal IDs to {name, type}
+                const fieldEntries = Object.entries(fields || {});
 
                 // Remove all existing outputs
                 this.clearOutputs();
 
                 // Add outputs for each field
-                fieldNames.forEach(name => {
-                    const type = fields[name] || '*';
-                    this.addOutput(name, type);
+                fieldEntries.forEach(([fieldId, fieldData]) => {
+                    this.addOutput(fieldData.name, fieldData.type);
+                    this.outputs[this.outputs.length - 1]._fieldId = fieldId; // Store internal ID
                 });
 
                 // Update size
@@ -562,7 +575,6 @@ app.registerExtension({
                     this.removeOutput(0);
                 }
             }
-
 
             validateLinks() {
                 // Remove invalid links when type changes
@@ -595,12 +607,12 @@ app.registerExtension({
             }
 
             setComboValues() {
-                // Trigger combo update by accessing widget
+                // To update combo widget, we need to trigger a re-render instead of setting read-only property
                 if (this.widgets && this.widgets.length > 0) {
                     const widget = this.widgets[0];
-                    if (widget.options && widget.options.values) {
-                        widget.options.values = [...widget.options.values];
-                    }
+                    // We can force a widget update by temporarily changing and restoring value
+                    const currentValue = widget.value;
+                    widget.value = currentValue;
                 }
             }
 
