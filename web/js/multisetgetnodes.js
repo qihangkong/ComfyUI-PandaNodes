@@ -542,13 +542,14 @@ app.registerExtension({
             }
 
             onGroupChange() {
-                const setter = this.findSetter(this.graph);
-                if (setter) {
-                    this.title = "Get_" + setter.widgets[0].value;
-                    this.updateFields(setter.properties.fields);
+                this.currentSetter = this.findSetter(this.graph); // 缓存 setter 引用
+                if (this.currentSetter) {
+                    this.title = "Get_" + this.currentSetter.widgets[0].value;
+                    this.updateFields(this.currentSetter.properties.fields);
                 } else {
                     this.title = "Multi Get";
                     this.clearOutputs();
+                    this.currentSetter = null;
                 }
             }
 
@@ -573,6 +574,50 @@ app.registerExtension({
             clearOutputs() {
                 while (this.outputs.length > 0) {
                     this.removeOutput(0);
+                }
+            }
+
+            getInputLink(slot) {
+                // Validate slot index
+                if (slot < 0 || slot >= this.outputs.length) {
+                    console.warn(`MultiGetNode: Invalid slot index ${slot}`);
+                    return null;
+                }
+
+                // Get the corresponding setter node
+                if (!this.currentSetter) {
+                    this.currentSetter = this.findSetter(this.graph);
+                }
+
+                if (this.currentSetter) {
+                    // Get the field ID from this output slot
+                    const fieldId = this.outputs[slot]?._fieldId;
+                    if (!fieldId) {
+                        console.warn(`MultiGetNode: No field ID found for output slot ${slot}`);
+                        return null;
+                    }
+
+                    // Find the corresponding input slot in the setter by field ID
+                    const setterInputIndex = this.currentSetter.inputs.findIndex(input => input._fieldId === fieldId);
+                    if (setterInputIndex === -1) {
+                        console.warn(`MultiGetNode: Field ID ${fieldId} not found in setter`);
+                        return null;
+                    }
+
+                    const slotInfo = this.currentSetter.inputs[setterInputIndex];
+                    if (!slotInfo?.link || !this.graph?.links) {
+                        // No connection yet or invalid graph state
+                        return null;
+                    }
+
+                    const link = this.graph.links[slotInfo.link];
+                    return link || null;
+                } else {
+                    const name = this.widgets[0].value;
+                    if (name) {
+                        console.warn(`MultiGetNode: No MultiSetNode found for group "${name}"`);
+                    }
+                    return null;
                 }
             }
 
