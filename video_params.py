@@ -15,15 +15,15 @@ class PandaVideoParams:
                 "duration": ("FLOAT", {
                     "default": 10.0, "min": 0.1, "max": 300.0, "step": 0.1
                 }),
-                "fps": ("INT", {
-                    "default": 24, "min": 1, "max": 120, "step": 1
+                "fps": ("FLOAT", {
+                    "default": 24.0, "min": 1.0, "max": 120.0, "step": 0.1
                 }),
                 "size_align": ([1, 4, 8, 16, 32], {"default": 8}),
                 "frame_align": ([1, 4, 8, 16, 32], {"default": 1}),
             }
         }
 
-    RETURN_TYPES = ("INT", "INT", "FLOAT", "INT", "INT", "STRING", "PANDA_VIDEO_PARAMS")
+    RETURN_TYPES = ("INT", "INT", "FLOAT", "FLOAT", "INT", "STRING", "PANDA_VIDEO_PARAMS")
     RETURN_NAMES = ("width", "height", "duration", "fps", "total_frames", "info", "config")
     FUNCTION = "calculate_params"
     CATEGORY = "PandaNodes/Video"
@@ -40,7 +40,7 @@ class PandaVideoParams:
 
         # 处理时长和帧率
         actual_duration = max(0.1, min(300.0, duration))
-        actual_fps = max(1, min(120, fps))
+        actual_fps = max(1.0, min(120.0, fps))
 
         # 计算基础总帧数 (fps * duration) + 1
         base_frames = round(actual_fps * actual_duration) + 1
@@ -49,7 +49,7 @@ class PandaVideoParams:
         total_frames = ceil_to_align(base_frames, frame_align)
 
         # 格式化信息字符串
-        info = f"{final_width}x{final_height} | {actual_fps} FPS | {actual_duration:.1f}s | {total_frames} frames (size_align:{size_align}, frame_align:{frame_align})"
+        info = f"{final_width}x{final_height} | {actual_fps:.1f} FPS | {actual_duration:.1f}s | {total_frames} frames (size_align:{size_align}, frame_align:{frame_align})"
 
         # 创建配置对象
         config = {
@@ -76,7 +76,7 @@ class PandaGetVideoParams:
             }
         }
 
-    RETURN_TYPES = ("INT", "INT", "FLOAT", "INT", "INT", "INT", "INT", "STRING")
+    RETURN_TYPES = ("INT", "INT", "FLOAT", "FLOAT", "INT", "INT", "INT", "STRING")
     RETURN_NAMES = ("width", "height", "duration", "fps", "total_frames", "size_align", "frame_align", "info")
     FUNCTION = "get_values"
     CATEGORY = "PandaNodes/Video"
