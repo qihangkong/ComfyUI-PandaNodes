@@ -1,4 +1,9 @@
-import math
+"""图片尺寸节点：宽高比 + 宽高 + 对齐"""
+from .panda_utils import (
+    PandaDefaults,
+    PandaAlignment,
+    PandaFormatUtils
+)
 
 
 class PandaImageSize:
@@ -11,14 +16,18 @@ class PandaImageSize:
                     "1:1", "16:9", "5:4", "4:3", "3:2", "2:3",
                     "2.39:1", "21:9", "18:9", "17:9", "1.85:1",
                     "9:16", "4:5", "3:4", "Custom"
-                ], {"default": "1:1"}),
+                ], {"default": PandaDefaults.IMAGE_SIZE["aspect_ratio"]}),
                 "width": ("INT", {
-                    "default": 1024, "min": 64, "max": 8192, "step": 1
+                    "default": PandaDefaults.IMAGE_SIZE["width"],
+                    "min": 64, "max": 8192, "step": 1
                 }),
                 "height": ("INT", {
-                    "default": 1024, "min": 64, "max": 8192, "step": 1
+                    "default": PandaDefaults.IMAGE_SIZE["height"],
+                    "min": 64, "max": 8192, "step": 1
                 }),
-                "align": ([1, 8, 16, 32], {"default": 8}),
+                "align": ([1, 8, 16, 32], {
+                    "default": PandaDefaults.IMAGE_SIZE["align"]
+                }),
             }
         }
 
@@ -36,21 +45,19 @@ class PandaImageSize:
             "9:16": (9, 16), "4:5": (4, 5), "3:4": (3, 4),
         }
 
-        # 四舍五入到对齐倍数
-        def round_to_align(value, align):
-            return int(round(value / align) * align)
-
         if aspect_ratio == "Custom":
             # 自定义模式：直接使用用户设置的宽高
-            final_width = round_to_align(width, align)
-            final_height = round_to_align(height, align)
+            final_width = PandaAlignment.round_to_align(width, align)
+            final_height = PandaAlignment.round_to_align(height, align)
         else:
             # 固定宽高比模式：业界做法 - 以 width 为基准计算 height
             w_ratio, h_ratio = ratios.get(aspect_ratio, (1, 1))
-            final_width = round_to_align(width, align)
-            final_height = round_to_align(final_width * h_ratio / w_ratio, align)
+            final_width = PandaAlignment.round_to_align(width, align)
+            final_height = PandaAlignment.round_to_align(final_width * h_ratio / w_ratio, align)
 
-        info = f"{final_width}x{final_height} | {aspect_ratio} | align:{align}"
+        info = PandaFormatUtils.format_image_info(
+            final_width, final_height, aspect_ratio, align
+        )
 
         # 创建配置对象
         config = {
@@ -80,10 +87,11 @@ class PandaGetImageSize:
     CATEGORY = "PandaNodes/Image"
 
     def get_values(self, config):
+        defs = PandaDefaults.IMAGE_SIZE
         return (
-            config.get("width", 1024),
-            config.get("height", 1024),
+            config.get("width", defs["width"]),
+            config.get("height", defs["height"]),
             config.get("info", ""),
-            config.get("aspect_ratio", "1:1"),
-            config.get("align", 8)
+            config.get("aspect_ratio", defs["aspect_ratio"]),
+            config.get("align", defs["align"])
         )
