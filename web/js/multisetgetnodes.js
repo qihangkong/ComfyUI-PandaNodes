@@ -579,6 +579,9 @@ app.registerExtension({
             }
 
             onGroupChange() {
+                if (!this.graph || !this.widgets || !this.widgets[0]) {
+                    return;
+                }
                 this.currentSetter = this.findSetter(this.graph);
                 if (this.currentSetter) {
                     this.title = "Get_" + this.currentSetter.widgets[0].value;
@@ -735,7 +738,7 @@ app.registerExtension({
             onAdded(graph) {
                 // When node is added to graph (including after cloning),
                 // update fields if we have a selected group
-                if (this.widgets[0].value) {
+                if (this.widgets && this.widgets.length > 0 && this.widgets[0] && this.widgets[0].value) {
                     this.onGroupChange();
                 }
             }
@@ -744,9 +747,15 @@ app.registerExtension({
                 // To update combo widget, we need to trigger a re-render instead of setting read-only property
                 if (this.widgets && this.widgets.length > 0) {
                     const widget = this.widgets[0];
-                    // We can force a widget update by temporarily changing and restoring value
-                    const currentValue = widget.value;
-                    widget.value = currentValue;
+                    // Only attempt to update widget if DOM element exists and widget is valid
+                    if (widget && widget.inputEl && widget.inputEl.value !== undefined) {
+                        try {
+                            const currentValue = widget.value;
+                            widget.value = currentValue;
+                        } catch (error) {
+                            console.warn("[PandaNodes] Failed to update combo widget:", error);
+                        }
+                    }
                 }
             }
 
