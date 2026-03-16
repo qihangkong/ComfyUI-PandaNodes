@@ -23,8 +23,8 @@ class PandaVideoParams:
             }
         }
 
-    RETURN_TYPES = ("INT", "INT", "FLOAT", "FLOAT", "INT", "STRING", "PANDA_VIDEO_PARAMS")
-    RETURN_NAMES = ("width", "height", "duration", "fps", "total_frames", "info", "config")
+    RETURN_TYPES = ("INT", "INT", "FLOAT", "FLOAT", "INT", "INT", "STRING", "PANDA_VIDEO_PARAMS")
+    RETURN_NAMES = ("width", "height", "duration", "fps", "total_frames", "total_frames_inc", "info", "config")
     FUNCTION = "calculate_params"
     CATEGORY = "PandaNodes/Video"
 
@@ -42,14 +42,15 @@ class PandaVideoParams:
         actual_duration = max(0.1, min(300.0, duration))
         actual_fps = max(1.0, min(120.0, fps))
 
-        # 计算基础总帧数 (fps * duration) + 1
-        base_frames = round(actual_fps * actual_duration) + 1
-
-        # 总帧数对齐（使用单独的对齐值）
+        # 计算基础总帧数 (fps * duration)
+        base_frames = round(actual_fps * actual_duration)
         total_frames = ceil_to_align(base_frames, frame_align)
 
+        # 计算包含起始帧的总帧数（直接在对齐后的基础上 +1）
+        total_frames_inc = total_frames + 1
+
         # 格式化信息字符串
-        info = f"{final_width}x{final_height} | {actual_fps:.1f} FPS | {actual_duration:.1f}s | {total_frames} frames (size_align:{size_align}, frame_align:{frame_align})"
+        info = f"{final_width}x{final_height} | {actual_fps:.1f} FPS | {actual_duration:.1f}s | {total_frames} frames ({total_frames_inc} inc) (size_align:{size_align}, frame_align:{frame_align})"
 
         # 创建配置对象
         config = {
@@ -58,12 +59,13 @@ class PandaVideoParams:
             "duration": actual_duration,
             "fps": actual_fps,
             "total_frames": total_frames,
+            "total_frames_inc": total_frames_inc,
             "size_align": size_align,
             "frame_align": frame_align,
             "info": info,
         }
 
-        return final_width, final_height, actual_duration, actual_fps, total_frames, info, config
+        return final_width, final_height, actual_duration, actual_fps, total_frames, total_frames_inc, info, config
 
 
 class PandaGetVideoParams:
@@ -76,8 +78,8 @@ class PandaGetVideoParams:
             }
         }
 
-    RETURN_TYPES = ("INT", "INT", "FLOAT", "FLOAT", "INT", "INT", "INT", "STRING")
-    RETURN_NAMES = ("width", "height", "duration", "fps", "total_frames", "size_align", "frame_align", "info")
+    RETURN_TYPES = ("INT", "INT", "FLOAT", "FLOAT", "INT", "INT", "INT", "INT", "STRING")
+    RETURN_NAMES = ("width", "height", "duration", "fps", "total_frames", "total_frames_inc", "size_align", "frame_align", "info")
     FUNCTION = "get_values"
     CATEGORY = "PandaNodes/Video"
 
@@ -87,7 +89,8 @@ class PandaGetVideoParams:
             config.get("height", 1024),
             config.get("duration", 10.0),
             config.get("fps", 24),
-            config.get("total_frames", 241),
+            config.get("total_frames", 240),
+            config.get("total_frames_inc", 241),
             config.get("size_align", 8),
             config.get("frame_align", 1),
             config.get("info", "")

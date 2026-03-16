@@ -171,8 +171,17 @@ app.registerExtension({
                         }
                     }
 
-                    // Update linked getters
+                    // Update linked getters and validate links
                     node.update();
+
+                    // Validate all getters' links after type change
+                    const getters = node.findGetters(node.graph);
+                    getters.forEach(getter => {
+                        if (getter.validateLinks) {
+                            getter.validateLinks();
+                        }
+                    });
+
                     node.size = node.computeSize();
                 };
             }
@@ -546,6 +555,8 @@ app.registerExtension({
                 if (this.currentSetter) {
                     this.title = "Get_" + this.currentSetter.widgets[0].value;
                     this.updateFields(this.currentSetter.properties.fields);
+                    // 验证连接
+                    this.validateLinks();
                 } else {
                     this.title = "Multi Get";
                     this.clearOutputs();
@@ -554,21 +565,84 @@ app.registerExtension({
             }
 
             updateFields(fields) {
-                // Store current outputs before clearing
+                console.log("=== updateFields called ===");
+                console.log("Incoming fields:", JSON.stringify(fields, null, 2));
+                console.log("Current outputs before update:", JSON.stringify(this.outputs.map((o, idx) => ({
+                    idx, name: o.name, type: o.type, _fieldId: o._fieldId
+                })), null, 2));
+
                 // fields is a map of internal IDs to {name, type}
                 const fieldEntries = Object.entries(fields || {});
 
-                // Remove all existing outputs
-                this.clearOutputs();
-
-                // Add outputs for each field
-                fieldEntries.forEach(([fieldId, fieldData]) => {
-                    this.addOutput(fieldData.name, fieldData.type);
-                    this.outputs[this.outputs.length - 1]._fieldId = fieldId; // Store internal ID
+                // Create a map of existing fields by fieldId for quick lookups
+                const existingFields = new Map();
+                this.outputs.forEach((output, index) => {
+                    if (output._fieldId) {
+                        existingFields.set(output._fieldId, { index, output });
+                    }
                 });
+
+                console.log("Existing fields map:", JSON.stringify(
+                    [...existingFields.entries()].map(([id, val]) => ({
+                        fieldId: id,
+                        index: val.index,
+                        name: val.output.name,
+                        type: val.output.type
+                    })),
+                    null,
+                    2
+                ));
+
+                // Process each field from MultiSetNode
+                fieldEntries.forEach(([fieldId, fieldData]) => {
+                    if (existingFields.has(fieldId)) {
+                        // Field exists, update name and type if needed
+                        const { index, output } = existingFields.get(fieldId);
+                        console.log(`Updating existing field: ${fieldId} at index ${index}`);
+                        console.log(`  Old: name=${output.name}, type=${output.type}`);
+                        console.log(`  New: name=${fieldData.name}, type=${fieldData.type}`);
+
+                        if (output.name !== fieldData.name) {
+                            output.name = fieldData.name;
+                        }
+                        if (output.type !== fieldData.type) {
+                            output.type = fieldData.type;
+                        }
+                        existingFields.delete(fieldId); // Mark as processed
+                    } else {
+                        // Field doesn't exist, add new output
+                        console.log(`Adding new field: ${fieldId} name=${fieldData.name} type=${fieldData.type}`);
+                        this.addOutput(fieldData.name, fieldData.type);
+                        this.outputs[this.outputs.length - 1]._fieldId = fieldId;
+                        console.log(`  Added output at index ${this.outputs.length - 1}`);
+                    }
+                });
+
+                console.log("Remaining existing fields to remove:", JSON.stringify(
+                    [...existingFields.entries()].map(([id, val]) => ({
+                        fieldId: id,
+                        index: val.index
+                    })),
+                    null,
+                    2
+                ));
+
+                // Remove fields that are no longer present in MultiSetNode
+                // Process in reverse order to avoid index shifts
+                Array.from(existingFields.values()).sort((a, b) => b.index - a.index).forEach(({ index }) => {
+                    console.log(`Removing output at index ${index}`);
+                    this.removeOutput(index);
+                });
+
+                console.log("Final outputs after update:", JSON.stringify(this.outputs.map((o, idx) => ({
+                    idx, name: o.name, type: o.type, _fieldId: o._fieldId
+                })), null, 2));
+                console.log("=== updateFields complete ===");
 
                 // Update size
                 this.size = this.computeSize();
+                // 验证连接
+                this.validateLinks();
             }
 
             clearOutputs() {
@@ -578,11 +652,18 @@ app.registerExtension({
             }
 
             getInputLink(slot) {
+                console.log(`getInputLink: slot ${slot}`);
+
                 // Validate slot index
                 if (slot < 0 || slot >= this.outputs.length) {
-                    console.warn(`MultiGetNode: Invalid slot index ${slot}`);
+                    console.warn(`MultiGetNode: Invalid slot index ${slot} (total outputs: ${this.outputs.length})`);
                     return null;
                 }
+
+                // Debug output slots
+                this.outputs.forEach((output, i) => {
+                    console.log(`Output ${i}: name=${output.name}, _fieldId=${output._fieldId}, type=${output.type}`);
+                });
 
                 // Get the corresponding setter node
                 if (!this.currentSetter) {
@@ -590,6 +671,9 @@ app.registerExtension({
                 }
 
                 if (this.currentSetter) {
+                    // Debug current setter fields
+                    console.log("Current setter properties:", this.currentSetter.properties);
+
                     // Get the field ID from this output slot
                     const fieldId = this.outputs[slot]?._fieldId;
                     if (!fieldId) {
@@ -601,6 +685,7 @@ app.registerExtension({
                     const setterInputIndex = this.currentSetter.inputs.findIndex(input => input._fieldId === fieldId);
                     if (setterInputIndex === -1) {
                         console.warn(`MultiGetNode: Field ID ${fieldId} not found in setter`);
+                        console.log("Setter inputs:", this.currentSetter.inputs.map((i, idx) => ({ idx, name: i.name, _fieldId: i._fieldId, type: i.type })));
                         return null;
                     }
 
@@ -624,11 +709,49 @@ app.registerExtension({
             validateLinks() {
                 // Remove invalid links when type changes
                 this.outputs.forEach((output, slotIndex) => {
-                    if (output.type !== '*' && output.links) {
+                    if (output.links && output.links.length > 0) {
+                        // 检查每个输出连接的有效性
                         output.links.filter(linkId => {
                             const link = this.graph.links[linkId];
-                            return link && (!link.type.split(",").includes(output.type) && link.type !== '*');
+                            if (!link) {
+                                return false; // 无效链接，不处理
+                            }
+
+                            // 输出类型是通配符 -> 所有连接都是有效的
+                            if (output.type === '*') {
+                                return false; // 不要过滤掉任何连接
+                            }
+
+                            // 检查输入节点的输入类型
+                            const fromNode = this.graph._nodes.find(n => n.id === link.target_id);
+                            if (!fromNode || !fromNode.inputs[link.target_slot]) {
+                                return false;
+                            }
+
+                            const targetInputType = fromNode.inputs[link.target_slot].type;
+
+                            // 目标输入类型是通配符 -> 连接是有效的
+                            if (targetInputType === '*') {
+                                return false; // 不要过滤掉任何连接
+                            }
+
+                            // 检查是否类型匹配：输出类型是否被接受
+                            const acceptedTypes = targetInputType.split(",");
+                            const outputTypes = output.type.split(",");
+
+                            // 检查输出类型和目标输入类型是否有重叠
+                            const hasMatchingType = outputTypes.some(t1 =>
+                                acceptedTypes.some(t2 => t1 === t2 || t1 === '*' || t2 === '*')
+                            );
+
+                            if (!hasMatchingType) {
+                                // 类型不匹配，应该断开连接
+                                return true;
+                            }
+
+                            return false; // 类型匹配，保留连接
                         }).forEach(linkId => {
+                            console.log(`Removing link from ${output.name} (type ${output.type}) due to type mismatch`);
                             this.graph.removeLink(linkId);
                         });
                     }
