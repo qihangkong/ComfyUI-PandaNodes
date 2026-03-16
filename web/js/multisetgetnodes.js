@@ -655,6 +655,7 @@ app.registerExtension({
             getInputLink(slot) {
                 // Validate slot index
                 if (slot < 0 || slot >= this.outputs.length) {
+                    console.warn(`MultiGetNode: Invalid slot index ${slot}`);
                     return null;
                 }
 
@@ -667,25 +668,27 @@ app.registerExtension({
                     // Get the field ID from this output slot
                     const fieldId = this.outputs[slot]?._fieldId;
                     if (!fieldId) {
+                        console.warn(`MultiGetNode: No field ID found for output slot ${slot}`);
                         return null;
                     }
 
                     // Find the corresponding input slot in the setter by field ID
                     const setterInputIndex = this.currentSetter.inputs.findIndex(input => input._fieldId === fieldId);
                     if (setterInputIndex === -1) {
+                        console.warn(`MultiGetNode: Field ID ${fieldId} not found in setter`);
                         return null;
                     }
 
                     const slotInfo = this.currentSetter.inputs[setterInputIndex];
-                    if (!slotInfo?.link || !this.graph?.links) {
-                        // No connection yet or invalid graph state
-                        return null;
+                    const link = this.graph.links[slotInfo.link];
+                    return link;
+                } else {
+                    const name = this.widgets[0].value;
+                    if (name) {
+                        console.warn(`MultiGetNode: No MultiSetNode found for group "${name}"`);
                     }
-
-                    return this.graph.links[slotInfo.link] || null;
+                    return null;
                 }
-
-                return null;
             }
 
             validateLinks() {
@@ -747,15 +750,8 @@ app.registerExtension({
                 // To update combo widget, we need to trigger a re-render instead of setting read-only property
                 if (this.widgets && this.widgets.length > 0) {
                     const widget = this.widgets[0];
-                    // Only attempt to update widget if DOM element exists and widget is valid
-                    if (widget && widget.inputEl && widget.inputEl.value !== undefined) {
-                        try {
-                            const currentValue = widget.value;
-                            widget.value = currentValue;
-                        } catch (error) {
-                            console.warn("[PandaNodes] Failed to update combo widget:", error);
-                        }
-                    }
+                    const currentValue = widget.value;
+                    widget.value = currentValue;
                 }
             }
 
