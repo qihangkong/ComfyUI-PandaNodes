@@ -58,11 +58,15 @@ function showAlert(message) {
 
 // Get unique field name to avoid duplicates
 function getUniqueFieldName(node, currentId, preferredName) {
+    if (!node || !node.inputs) {
+        return preferredName;
+    }
+
     let uniqueName = preferredName;
     let tries = 0;
 
     while (node.inputs.some((input) =>
-        input._fieldId !== currentId && input.name === uniqueName && input.name !== 'unused'
+        input && input._fieldId !== currentId && input.name === uniqueName && input.name !== 'unused'
     )) {
         uniqueName = `${preferredName}_${tries}`;
         tries++;
@@ -73,27 +77,37 @@ function getUniqueFieldName(node, currentId, preferredName) {
 
 // Update field name with duplicate checking
 function updateFieldName(node, inputIndex, oldName, newName, widget) {
-    const preferredName = newName.trim() || `field_${inputIndex + 1}`;
+    // Safety checks
+    if (!node || !node.inputs || !node.inputs[inputIndex]) {
+        return;
+    }
+
+    const preferredName = (newName && newName.trim()) || `field_${inputIndex + 1}`;
 
     if (preferredName !== oldName) {
-        const uniqueName = getUniqueFieldName(node, node.inputs[inputIndex]._fieldId, preferredName);
+        const fieldId = node.inputs[inputIndex]._fieldId;
+        const uniqueName = getUniqueFieldName(node, fieldId, preferredName);
 
         // Update input name (display only)
         node.inputs[inputIndex].name = uniqueName;
 
         // Update properties - using internal ID for storage
-        if (node.properties.fields && node.properties.fields[node.inputs[inputIndex]._fieldId]) {
-            const fieldData = node.properties.fields[node.inputs[inputIndex]._fieldId];
+        if (node.properties && node.properties.fields && fieldId && node.properties.fields[fieldId]) {
+            const fieldData = node.properties.fields[fieldId];
             fieldData.name = uniqueName;
         }
 
         // Update widget value to show actual name (including _n suffix)
-        if (widget && widget.value !== uniqueName) {
+        if (widget && widget.value !== undefined && widget.value !== uniqueName) {
             widget.value = uniqueName;
         }
 
-        node.update();
-        node.size = node.computeSize();
+        if (node.update) {
+            node.update();
+        }
+        if (node.computeSize) {
+            node.size = node.computeSize();
+        }
     }
 }
 
@@ -306,49 +320,51 @@ app.registerExtension({
             }
 
             clone() {
-                const cloned = MultiSetNode.prototype.clone.apply(this);
+                const cloned = super.clone();
                 cloned.properties = JSON.parse(JSON.stringify(this.properties));
                 cloned.properties.previousName = '';
-                cloned.size = cloned.computeSize();
 
-                // Reset inputs and widgets
+                // Reset inputs - remove all first
                 while (cloned.inputs.length > 0) {
                     cloned.removeInput(0);
                 }
-                // Keep first 3 widgets (group name and buttons), remove others
-                while (cloned.widgets.length > 3) {
-                    cloned.widgets.pop();
-                }
+
+                // Keep first 3 widgets, rebuild the rest carefully
+                const preservedWidgets = cloned.widgets.slice(0, 3);
+                cloned.widgets.length = 0;
+                preservedWidgets.forEach(w => cloned.widgets.push(w));
 
                 // Re-add fields with widgets
-                Object.keys(cloned.properties.fields || {}).forEach((fieldId, index) => {
+                const fieldIds = Object.keys(cloned.properties.fields || {});
+                fieldIds.forEach((fieldId, index) => {
                     const fieldData = cloned.properties.fields[fieldId];
                     cloned.addInput(fieldData.name, fieldData.type);
                     const newInputIndex = cloned.inputs.length - 1;
                     cloned.inputs[newInputIndex]._fieldId = fieldId;
 
                     // Add text widget for field name
-                    const node = cloned;
                     const fieldWidget = cloned.addWidget(
                         "text",
                         `Field ${index + 1}`,
                         fieldData.name,
-                        (value) => {
-                            const widgetIndex = node.widgets.indexOf(fieldWidget);
+                        function(value) {
+                            // Use this.widgets instead of captured variable to avoid stale references
+                            const widgetIndex = this.widgets.indexOf(fieldWidget);
                             const inputIndex = widgetIndex - 3;
-                            if (inputIndex >= 0 && inputIndex < node.inputs.length) {
-                                const oldName = node.inputs[inputIndex].name;
-                                updateFieldName(node, inputIndex, oldName, value, fieldWidget);
+                            if (inputIndex >= 0 && inputIndex < this.inputs.length && this.inputs[inputIndex]) {
+                                const oldName = this.inputs[inputIndex].name;
+                                updateFieldName(this, inputIndex, oldName, value, fieldWidget);
                             }
-                        },
+                        }.bind(cloned),
                         {}
                     );
                 });
 
-                if (Object.keys(cloned.properties.fields || {}).length === 0) {
+                if (fieldIds.length === 0) {
                     cloned.addField();
                 }
 
+                cloned.size = cloned.computeSize();
                 return cloned;
             }
 
@@ -703,10 +719,25 @@ app.registerExtension({
             }
 
             clone() {
-                const cloned = MultiGetNode.prototype.clone.apply(this);
+                const cloned = super.clone();
                 cloned.properties = JSON.parse(JSON.stringify(this.properties));
+
+                // Clear existing outputs (they will be regenerated by onAdded)
+                while (cloned.outputs.length > 0) {
+                    cloned.removeOutput(0);
+                }
+
+                cloned.currentSetter = null;
                 cloned.size = cloned.computeSize();
                 return cloned;
+            }
+
+            onAdded(graph) {
+                // When node is added to graph (including after cloning),
+                // update fields if we have a selected group
+                if (this.widgets[0].value) {
+                    this.onGroupChange();
+                }
             }
 
             setComboValues() {
