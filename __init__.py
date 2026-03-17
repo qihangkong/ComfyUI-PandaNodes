@@ -2,6 +2,9 @@
 
 from .image_size import PandaImageSize, PandaGetImageSize
 from .video_params import PandaVideoParams, PandaGetVideoParams
+from .llama_vlm import (
+    PandaVLM,
+)
 
 # Register all nodes
 NODE_CLASS_MAPPINGS = {
@@ -9,6 +12,7 @@ NODE_CLASS_MAPPINGS = {
     "PandaGetImageSize": PandaGetImageSize,
     "PandaVideoParams": PandaVideoParams,
     "PandaGetVideoParams": PandaGetVideoParams,
+    "PandaVLM": PandaVLM,
 }
 
 # Display names for nodes
@@ -17,6 +21,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PandaGetImageSize": "Panda Get Image Size",
     "PandaVideoParams": "Panda Video Params",
     "PandaGetVideoParams": "Panda Get Video Params",
+    "PandaVLM": "Panda VLM",
 }
 
 # Web directory for frontend extensions

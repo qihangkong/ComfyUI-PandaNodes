@@ -372,6 +372,23 @@ app.registerExtension({
                 this.validateName(graph);
             }
 
+            configure(data) {
+                const result = super.configure(data);
+
+                // After configuration is loaded, restore the field IDs on inputs
+                // We need to match existing fields from properties with inputs
+                if (this.properties && this.properties.fields) {
+                    const fieldIds = Object.keys(this.properties.fields);
+                    fieldIds.forEach((fieldId, index) => {
+                        if (this.inputs[index]) {
+                            this.inputs[index]._fieldId = fieldId;
+                        }
+                    });
+                }
+
+                return result;
+            }
+
             update() {
                 if (!this.graph) {
                     return;
@@ -744,6 +761,27 @@ app.registerExtension({
                 if (this.widgets && this.widgets.length > 0 && this.widgets[0] && this.widgets[0].value) {
                     this.onGroupChange();
                 }
+            }
+
+            configure(data) {
+                // First call the super class configure method to restore the node
+                const result = super.configure(data);
+
+                // After configuration is loaded, restore the field IDs
+                if (this.widgets && this.widgets.length > 0 && this.widgets[0] && this.widgets[0].value) {
+                    // We need to wait for the graph to be ready and the MultiSetNode to be loaded
+                    const restoreFieldIds = () => {
+                        if (!this.graph) {
+                            // If graph is not yet ready, try again
+                            setTimeout(restoreFieldIds, 50);
+                            return;
+                        }
+                        this.onGroupChange();
+                    };
+                    setTimeout(restoreFieldIds, 0);
+                }
+
+                return result;
             }
 
             setComboValues() {
