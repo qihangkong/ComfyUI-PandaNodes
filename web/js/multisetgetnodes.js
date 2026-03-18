@@ -936,17 +936,46 @@ app.registerExtension({
                     widgetValue: this.widgets && this.widgets[0] ? this.widgets[0].value : null
                 });
 
+                // 确保 _isConfiguring 标志有默认值
+                if (this._isConfiguring === undefined) {
+                    this._isConfiguring = false;
+                }
+
                 // When node is added to graph (including after cloning),
                 // update fields if we have a selected group
-                if (this.widgets && this.widgets.length > 0 && this.widgets[0] && this.widgets[0].value) {
-                    // 关键修复：在 onAdded() 中，临时覆盖 _isConfiguring 标志，确保克隆后能立即同步字段
-                    const savedIsConfiguring = this._isConfiguring;
-                    this._isConfiguring = false;
+                if (this.widgets && this.widgets.length > 0 && this.widgets[0]) {
+                    // 关键修复：粘贴操作可能 widget 值还没完全恢复，使用延迟调用
+                    const widgetValue = this.widgets[0].value;
 
-                    this.onGroupChange();
+                    const trySync = () => {
+                        // 再次检查，可能 widget 值已更新
+                        const currentValue = this.widgets && this.widgets[0] ? this.widgets[0].value : null;
 
-                    // 恢复原始标志
-                    this._isConfiguring = savedIsConfiguring;
+                        console.log("[MultiGetNode DEBUG] onAdded() trySync", {
+                            currentValue: currentValue,
+                            originalValue: widgetValue
+                        });
+
+                        if (currentValue) {
+                            // 临时覆盖 _isConfiguring 标志，确保能同步字段
+                            const savedIsConfiguring = this._isConfiguring;
+                            this._isConfiguring = false;
+
+                            this.onGroupChange();
+
+                            // 恢复原始标志
+                            this._isConfiguring = savedIsConfiguring;
+                        }
+                    };
+
+                    // 如果当前已有值，直接同步；否则延迟尝试
+                    if (widgetValue) {
+                        trySync();
+                    } else {
+                        // 对于粘贴操作，widget 值可能需要等待一下才能恢复
+                        setTimeout(trySync, 50);
+                        setTimeout(trySync, 200);
+                    }
                 }
             }
 
@@ -1022,8 +1051,8 @@ app.registerExtension({
                 }
 
                 // 延迟同步，确保 graph 和 setter 节点都已恢复
-                if (this.widgets && this.widgets.length > 0 && this.widgets[0] && this.widgets[0].value) {
-                    console.log("[MultiGetNode DEBUG] Group name has value, scheduling sync with setter:", this.widgets[0].value);
+                if (this.widgets && this.widgets.length > 0 && this.widgets[0]) {
+                    console.log("[MultiGetNode DEBUG] Widget available, scheduling sync with value:", this.widgets[0].value);
 
                     if (!this._configureTimeout) {
                         this._configureTimeout = setTimeout(() => {
@@ -1035,21 +1064,40 @@ app.registerExtension({
                                 return;
                             }
 
-                            // 关键修复：updateFields() 现在能正确处理 _fieldId 无效的情况
-                            this._isConfiguring = false;
-                            this.currentSetter = this.findSetter(this.graph);
-                            if (this.currentSetter) {
-                                this.title = "Get_" + this.currentSetter.widgets[0].value;
+                            // 关键修复：即使 widgetValue 之前是空的，现在再检查一次
+                            const widgetValue = this.widgets && this.widgets[0] ? this.widgets[0].value : null;
+                            console.log("[MultiGetNode DEBUG] Timeout sync, widgetValue now:", widgetValue);
 
-                                if (allFieldIdsRestored) {
+                            if (widgetValue) {
+                                this._isConfiguring = false;
+                                this.currentSetter = this.findSetter(this.graph);
+                                if (this.currentSetter) {
+                                    this.title = "Get_" + this.currentSetter.widgets[0].value;
 
-                                } else {
-                                    // 如果 fieldId 恢复失败，直接调用 updateFields()，它能正确处理
+                                    if (allFieldIdsRestored) {
 
-                                    this.updateFields(this.currentSetter.properties.fields);
+                                    } else {
+                                        // 如果 fieldId 恢复失败，直接调用 updateFields()，它能正确处理
+                                        console.log("[MultiGetNode DEBUG] allFieldIdsRestored is false, calling updateFields");
+                                        this.updateFields(this.currentSetter.properties.fields);
+                                    }
                                 }
                             }
                         }, 200);
+
+                        // 备用同步，确保能处理粘贴操作的 widgetValue 延迟恢复
+                        setTimeout(() => {
+                            const widgetValue = this.widgets && this.widgets[0] ? this.widgets[0].value : null;
+                            if (widgetValue && !this.currentSetter) {
+                                console.log("[MultiGetNode DEBUG] Backup sync, widgetValue found:", widgetValue);
+                                this._isConfiguring = false;
+                                this.currentSetter = this.findSetter(this.graph);
+                                if (this.currentSetter) {
+                                    this.title = "Get_" + this.currentSetter.widgets[0].value;
+                                    this.updateFields(this.currentSetter.properties.fields);
+                                }
+                            }
+                        }, 400);
                     }
                 } else {
 
