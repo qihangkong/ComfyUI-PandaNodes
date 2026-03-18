@@ -404,6 +404,31 @@ app.registerExtension({
                     });
                 }
 
+                // 关键修复：恢复字段重命名的 text widget（与 clone() 方法类似）
+                // 前3个 widget 是固定的：name、+Add Field、-Remove Last（都是0-based）
+                if (this.widgets.length <= 3 && this.properties.fields) {
+                    const fieldIds = Object.keys(this.properties.fields);
+                    fieldIds.forEach((fieldId, index) => {
+                        const fieldData = this.properties.fields[fieldId];
+
+                        // Add text widget for field name
+                        const fieldWidget = this.addWidget(
+                            "text",
+                            `Field ${index + 1}`,
+                            fieldData.name,
+                            function(value) {
+                                const widgetIndex = this.widgets.indexOf(fieldWidget);
+                                const inputIndex = widgetIndex - 3; // 前面3个是固定的
+                                if (inputIndex >= 0 && inputIndex < this.inputs.length && this.inputs[inputIndex]) {
+                                    const oldName = this.inputs[inputIndex].name;
+                                    updateFieldName(this, inputIndex, oldName, value, fieldWidget);
+                                }
+                            }.bind(this),
+                            {}
+                        );
+                    });
+                }
+
                 // Clear the configuring flag after a short delay to ensure everything is ready
                 setTimeout(() => {
                     this._isConfiguring = false;
@@ -630,12 +655,12 @@ app.registerExtension({
 
                 // Skip if we're in the middle of configuring to prevent duplicates
                 if (this._isConfiguring) {
-                    console.log("[MultiGetNode DEBUG] Skipping onGroupChange() because _isConfiguring is true");
+                    
                     return;
                 }
 
                 if (!this.graph || !this.widgets || !this.widgets[0]) {
-                    console.log("[MultiGetNode DEBUG] Missing graph or widgets");
+                    
                     return;
                 }
                 this.currentSetter = this.findSetter(this.graph);
@@ -644,10 +669,11 @@ app.registerExtension({
 
                 if (this.currentSetter) {
                     console.log("[MultiGetNode DEBUG] Setter properties.fields:", this.currentSetter.properties.fields);
-                    // 使用新的安全同步方法，完全从零开始同步
-                    this.safeSyncFromScratch(this.currentSetter);
+                    this.title = "Get_" + this.currentSetter.widgets[0].value;
+                    // 使用保留连线的 updateFields 方法，替代 safeSyncFromScratch()
+                    this.updateFields(this.currentSetter.properties.fields);
                 } else {
-                    console.log("[MultiGetNode DEBUG] No setter found, clearing outputs");
+                    
                     this.title = "Multi Get";
                     this.clearOutputs();
                     this.currentSetter = null;
@@ -655,19 +681,127 @@ app.registerExtension({
             }
 
             updateFields(fields) {
-                console.log("[MultiGetNode DEBUG] updateFields() called (simplified)", {
+                // 在 _isConfiguring 期间，完全阻止 updateFields() 的调用！这是防止重复字段的关键！
+                if (this._isConfiguring) {
+                    console.log("[MultiGetNode DEBUG] updateFields() skipped during configuration", {
+                        nodeTitle: this.title,
+                        nodeId: this.id
+                    });
+                    return;
+                }
+
+                console.log("[MultiGetNode DEBUG] updateFields() called", {
                     nodeTitle: this.title,
                     nodeId: this.id,
-                    fields: fields
+                    fields: fields,
+                    currentOutputsCount: this.outputs.length
                 });
 
-                // 简化实现：直接使用 currentSetter 来同步，保持向后兼容
-                if (this.currentSetter) {
-                    console.log("[MultiGetNode DEBUG] Using safeSyncFromScratch() from updateFields()");
-                    this.safeSyncFromScratch(this.currentSetter);
-                } else {
-                    console.log("[MultiGetNode DEBUG] No currentSetter available in updateFields()");
+                if (!fields) {
+                    
+                    return;
                 }
+
+                // 过滤掉无效字段（保留在 MultiGetNode 中的修复）
+                const validFieldsEntries = Object.entries(fields || {}).filter(([fieldId, fieldData]) => {
+                    const isValid = fieldId && fieldId !== 'undefined' && fieldData && fieldData.name;
+                    if (!isValid) {
+                        console.warn(`[MultiGetNode DEBUG] Filtering invalid field from fields: fieldId=${fieldId}, fieldData=`, fieldData);
+                    }
+                    return isValid;
+                });
+
+                // 创建现有字段的 map：key 是 fieldId, value 是索引
+                const fieldIdToIndex = new Map();
+                // 创建现有字段的 name 到索引的 map：用于 name 匹配（当 _fieldId 无效时）
+                const fieldNameToIndex = new Map();
+
+                this.outputs.forEach((output, index) => {
+                    if (output._fieldId && output._fieldId !== 'undefined' && output._fieldId !== 'null') {
+                        fieldIdToIndex.set(output._fieldId, index);
+                    }
+                    if (output.name) {
+                        fieldNameToIndex.set(output.name, index);
+                    }
+                });
+
+                let hasChanges = false;
+                const processedFieldIds = new Set();
+
+                // 处理每个有效的字段
+                validFieldsEntries.forEach(([fieldId, fieldData]) => {
+                    console.log(`[MultiGetNode DEBUG] Processing valid field: fieldId=${fieldId}, name=${fieldData.name}`);
+
+                    let targetIndex = -1;
+
+                    // 先尝试通过 fieldId 匹配
+                    if (fieldIdToIndex.has(fieldId)) {
+                        targetIndex = fieldIdToIndex.get(fieldId);
+                        processedFieldIds.add(fieldId);
+                        console.log(`[MultiGetNode DEBUG] Field found by fieldId at index ${targetIndex}`);
+                    }
+                    // 如果 fieldId 没找到，尝试通过 name 匹配（保留连线）
+                    else if (fieldNameToIndex.has(fieldData.name)) {
+                        targetIndex = fieldNameToIndex.get(fieldData.name);
+                        // 更新匹配的输出的 fieldId
+                        this.outputs[targetIndex]._fieldId = fieldId;
+                        processedFieldIds.add(fieldId); // 关键修复：标记为已处理！
+                        console.log(`[MultiGetNode DEBUG] Field found by name at index ${targetIndex}, updating fieldId (processed)`);
+                        hasChanges = true;
+                    }
+                    // 都没找到，添加新输出
+                    else {
+                        console.log(`[MultiGetNode DEBUG] Adding new output fieldId=${fieldId}, name=${fieldData.name}`);
+                        this.addOutput(fieldData.name, fieldData.type);
+                        this.outputs[this.outputs.length - 1]._fieldId = fieldId;
+                        hasChanges = true;
+                        return;
+                    }
+
+                    // 更新字段的其他属性
+                    const output = this.outputs[targetIndex];
+                    if (output.name !== fieldData.name) {
+                        output.name = fieldData.name;
+                        hasChanges = true;
+                        console.log(`[MultiGetNode DEBUG] Updated field name at index ${targetIndex} from ${output.name} to ${fieldData.name}`);
+                    }
+                    if (output.type !== fieldData.type) {
+                        output.type = fieldData.type;
+                        hasChanges = true;
+                        console.log(`[MultiGetNode DEBUG] Updated field type at index ${targetIndex} from ${output.type} to ${fieldData.type}`);
+                    }
+                });
+
+                // 删除不存在于 MultiSetNode 中的字段（倒序删除）
+                for (let i = this.outputs.length - 1; i >= 0; i--) {
+                    const output = this.outputs[i];
+                    const fieldIdValid = output._fieldId && output._fieldId !== 'undefined' && output._fieldId !== 'null';
+
+                    if (fieldIdValid) {
+                        // 检查这个 fieldId 是否在我们处理过的列表中
+                        const fieldStillExists = validFieldsEntries.some(([id]) => id === output._fieldId);
+                        if (!fieldStillExists) {
+                            console.log(`[MultiGetNode DEBUG] Removing field by fieldId: index=${i}, fieldId=${output._fieldId}, name=${output.name}`);
+                            this.removeOutput(i);
+                            hasChanges = true;
+                        }
+                    } else {
+                        // 如果没有有效的 fieldId，尝试通过 name 检查
+                        const nameStillExists = validFieldsEntries.some(([_, data]) => data.name === output.name);
+                        if (!nameStillExists) {
+                            console.log(`[MultiGetNode DEBUG] Removing field by name: index=${i}, name=${output.name}`);
+                            this.removeOutput(i);
+                            hasChanges = true;
+                        }
+                    }
+                }
+
+                if (hasChanges) {
+                    this.size = this.computeSize();
+                    this.validateLinks();
+                }
+
+                console.log(`[MultiGetNode DEBUG] updateFields() completed, final outputs count: ${this.outputs.length}`);
             }
 
             clearOutputs() {
@@ -771,6 +905,9 @@ app.registerExtension({
             }
 
             configure(data) {
+                // 关键：在调用任何可能触发 updateFields() 的操作之前，先设置 _isConfiguring！
+                this._isConfiguring = true;
+
                 console.log("[MultiGetNode DEBUG] configure() called", {
                     nodeTitle: this.title,
                     nodeId: this.id,
@@ -780,22 +917,34 @@ app.registerExtension({
                     outputs: data.outputs ? data.outputs.map(o => ({ name: o.name, _fieldId: o._fieldId })) : []
                 });
 
-                // 标记配置状态，防止重复处理
-                this._isConfiguring = true;
+                // 保存原始配置数据中的 outputs，用于恢复 fieldId
+                const savedOutputs = data.outputs ? JSON.parse(JSON.stringify(data.outputs)) : [];
 
                 // 先调用 super.configure() 恢复基本状态
                 const result = super.configure(data);
 
-                // 简化逻辑：配置恢复后，完全忽略保存的 outputs
-                // 我们要直接从 MultiSetNode 同步正确的字段
                 console.log("[MultiGetNode DEBUG] After super.configure(), current outputs:",
                     this.outputs.map(o => ({ name: o.name, _fieldId: o._fieldId })));
 
-                // 清除所有可能被错误恢复的 outputs，稍后从 setter 重新同步
-                while (this.outputs.length > 0) {
-                    this.removeOutput(0);
+                // 关键修复：恢复保存的 outputs 的 _fieldId
+                // 并且确保我们的恢复是在 super.configure() 之后立即执行
+                let allFieldIdsRestored = true;
+                if (savedOutputs && savedOutputs.length > 0) {
+                    savedOutputs.forEach((savedOutput, index) => {
+                        if (this.outputs[index]) {
+                            // 只在 savedOutput._fieldId 确实有效时才恢复
+                            if (savedOutput._fieldId && savedOutput._fieldId !== 'undefined' && savedOutput._fieldId !== 'null') {
+                                this.outputs[index]._fieldId = savedOutput._fieldId;
+                            } else {
+                                // 只要有一个输出的 fieldId 是无效的，就标记为未完全恢复
+                                allFieldIdsRestored = false;
+                            }
+                        }
+                    });
+                    console.log("[MultiGetNode DEBUG] After restoring field IDs:",
+                        this.outputs.map(o => ({ name: o.name, _fieldId: o._fieldId })),
+                        "allFieldIdsRestored:", allFieldIdsRestored);
                 }
-                console.log("[MultiGetNode DEBUG] Cleared all outputs for fresh sync");
 
                 // 延迟同步，确保 graph 和 setter 节点都已恢复
                 if (this.widgets && this.widgets.length > 0 && this.widgets[0] && this.widgets[0].value) {
@@ -803,182 +952,49 @@ app.registerExtension({
 
                     if (!this._configureTimeout) {
                         this._configureTimeout = setTimeout(() => {
+                            const localTimeout = this._configureTimeout;
                             this._configureTimeout = null;
+
+                            // 只有当我们还是有效的 timeout 持有者时才清除标志并同步
+                            if (!localTimeout) {
+                                return;
+                            }
+
+                            // 关键修复：updateFields() 现在能正确处理 _fieldId 无效的情况
                             this._isConfiguring = false;
+                            this.currentSetter = this.findSetter(this.graph);
+                            if (this.currentSetter) {
+                                this.title = "Get_" + this.currentSetter.widgets[0].value;
 
-                            if (this.graph) {
-                                const setter = this.findSetter(this.graph);
-                                console.log("[MultiGetNode DEBUG] Found setter after delay:", setter ? { title: setter.title, id: setter.id, _isConfiguring: setter._isConfiguring } : null);
-
-                                if (setter) {
-                                    // 等待 setter 完成自身配置
-                                    if (setter._isConfiguring) {
-                                        console.log("[MultiGetNode DEBUG] Setter is still configuring, waiting a bit more...");
-                                        setTimeout(() => {
-                                            this._isConfiguring = false;
-                                            this.safeSyncFromScratch(setter);
-                                        }, 150);
-                                    } else {
-                                        this.safeSyncFromScratch(setter);
-                                    }
+                                if (allFieldIdsRestored) {
+                                    
+                                } else {
+                                    // 如果 fieldId 恢复失败，直接调用 updateFields()，它能正确处理
+                                    
+                                    this.updateFields(this.currentSetter.properties.fields);
                                 }
                             }
                         }, 200);
                     }
                 } else {
-                    console.log("[MultiGetNode DEBUG] No group name, clearing configuring flag");
+                    
                     setTimeout(() => {
-                        this._isConfiguring = false;
+                        if (!this._configureTimeout) {
+                            this._isConfiguring = false;
+                        }
                     }, 0);
                 }
 
                 return result;
             }
 
-            // 新增方法：完全从零开始同步字段
-            safeSyncFromScratch(setter) {
-                console.log("[MultiGetNode DEBUG] safeSyncFromScratch() called", {
-                    nodeTitle: this.title,
-                    nodeId: this.id,
-                    setterTitle: setter.title,
-                    setterId: setter.id,
-                    setterFields: setter.properties.fields
-                });
 
-                if (!setter.properties.fields) {
-                    console.log("[MultiGetNode DEBUG] No fields in setter properties");
-                    return;
-                }
-
-                // 首先确保清除所有现有输出
-                while (this.outputs.length > 0) {
-                    this.removeOutput(0);
-                }
-
-                // 关键修复：过滤掉无效的字段（fieldId 为 null 或 undefined）
-                const fieldEntries = Object.entries(setter.properties.fields).filter(([fieldId, fieldData]) => {
-                    const isValid = fieldId && fieldId !== 'undefined' && fieldData && fieldData.name;
-                    if (!isValid) {
-                        console.warn(`[MultiGetNode DEBUG] Filtering out invalid field: fieldId=${fieldId}, fieldData=`, fieldData);
-                    }
-                    return isValid;
-                });
-
-                console.log(`[MultiGetNode DEBUG] Recreating ${fieldEntries.length} valid outputs from setter (filtered out invalid fields)`);
-
-                fieldEntries.forEach(([fieldId, fieldData]) => {
-                    console.log(`[MultiGetNode DEBUG] Adding output: fieldId=${fieldId}, name=${fieldData.name}, type=${fieldData.type}`);
-                    this.addOutput(fieldData.name, fieldData.type);
-                    this.outputs[this.outputs.length - 1]._fieldId = fieldId;
-                });
-
-                this.currentSetter = setter;
-                this.title = "Get_" + setter.widgets[0].value;
-                this.size = this.computeSize();
-                this.validateLinks();
-
-                console.log("[MultiGetNode DEBUG] safeSyncFromScratch() completed, final outputs:",
-                    this.outputs.map(o => ({ name: o.name, _fieldId: o._fieldId })));
-            }
-
-            // 新增：安全同步方法，用于撤销后的场景
-            safeSyncWithSetter(setter, savedOutputs) {
-                console.log("[MultiGetNode DEBUG] safeSyncWithSetter() called", {
-                    nodeTitle: this.title,
-                    nodeId: this.id,
-                    setterTitle: setter.title,
-                    setterId: setter.id,
-                    savedOutputs: savedOutputs ? savedOutputs.map(o => ({ name: o.name, _fieldId: o._fieldId })) : [],
-                    currentOutputs: this.outputs.map(o => ({ name: o.name, _fieldId: o._fieldId }))
-                });
-
-                if (!setter.properties.fields) {
-                    console.log("[MultiGetNode DEBUG] No fields in setter properties");
-                    return;
-                }
-
-                console.log("[MultiGetNode DEBUG] Setter properties.fields:", setter.properties.fields);
-
-                const setterFields = Object.entries(setter.properties.fields || {});
-                const currentFieldCount = this.outputs.length;
-                const setterFieldCount = setterFields.length;
-
-                console.log(`[MultiGetNode DEBUG] Field counts: current=${currentFieldCount}, setter=${setterFieldCount}`);
-
-                // 只有在字段数量明显不匹配时才进行完全同步
-                // 或者检查字段内容是否一致
-                let needsSync = false;
-
-                if (currentFieldCount !== setterFieldCount) {
-                    console.log(`[MultiGetNode DEBUG] Field count mismatch, needsSync=true`);
-                    needsSync = true;
-                } else {
-                    // 检查字段内容是否一致
-                    console.log("[MultiGetNode DEBUG] Field counts match, checking field content...");
-                    for (let i = 0; i < currentFieldCount; i++) {
-                        const ourOutput = this.outputs[i];
-                        const [setterFieldId, setterFieldData] = setterFields[i] || [];
-
-                        console.log(`[MultiGetNode DEBUG] Comparing field ${i}: our[${ourOutput?._fieldId}, ${ourOutput?.name}, ${ourOutput?.type}] vs setter[${setterFieldId}, ${setterFieldData?.name}, ${setterFieldData?.type}]`);
-
-                        if (!ourOutput || !setterFieldId || !setterFieldData) {
-                            console.log("[MultiGetNode DEBUG] Invalid field at index", i);
-                            needsSync = true;
-                            break;
-                        }
-
-                        if (ourOutput._fieldId !== setterFieldId ||
-                            ourOutput.name !== setterFieldData.name ||
-                            ourOutput.type !== setterFieldData.type) {
-                            console.log("[MultiGetNode DEBUG] Field mismatch at index", i);
-                            needsSync = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (needsSync) {
-                    console.log("[MultiGetNode DEBUG] Needs sync, calling updateFields() with setter fields");
-                    // 只有在确实需要同步时才进行
-                    this.currentSetter = setter;
-                    this.title = "Get_" + setter.widgets[0].value;
-                    this.updateFields(setter.properties.fields);
-                    this.validateLinks();
-                } else {
-                    console.log("[MultiGetNode DEBUG] Fields already match, no sync needed");
-                }
-            }
-
+            // 保持向后兼容的安全同步方法
             safeOnGroupChange() {
-                // A safe version of onGroupChange that checks if we're already configuring
                 if (this._isConfiguring) {
                     return;
                 }
                 this.onGroupChange();
-            }
-
-            // 新增方法：完全重新构建输出字段（用于撤销操作后的精确同步）
-            rebuildOutputsFromSetter() {
-                if (!this.currentSetter || !this.currentSetter.properties.fields) {
-                    return;
-                }
-
-                const fields = this.currentSetter.properties.fields;
-                const fieldEntries = Object.entries(fields || {});
-
-                // 先清除所有现有输出
-                while (this.outputs.length > 0) {
-                    this.removeOutput(0);
-                }
-
-                // 然后完全重新添加所有字段
-                fieldEntries.forEach(([fieldId, fieldData]) => {
-                    this.addOutput(fieldData.name, fieldData.type);
-                    this.outputs[this.outputs.length - 1]._fieldId = fieldId;
-                });
-
-                this.size = this.computeSize();
-                this.validateLinks();
             }
 
             setComboValues() {
