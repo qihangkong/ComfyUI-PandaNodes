@@ -21,18 +21,18 @@ const TypeUtils = {
 // Node finding utility
 const NodeFinder = {
     findNodesByTypeAndName: function(graph, nodeType, widgetValue) {
-        if (!widgetValue) return [];
-        return graph._nodes.filter(otherNode =>
+        if (!graph || !widgetValue) return [];
+        return graph._nodes?.filter(otherNode =>
             otherNode.type === nodeType &&
             otherNode.widgets[0].value === widgetValue
-        );
+        ) || [];
     },
     findNodeByTypeAndName: function(graph, nodeType, widgetValue) {
-        if (!widgetValue) return null;
-        return graph._nodes.find(otherNode =>
+        if (!graph || !widgetValue) return null;
+        return graph._nodes?.find(otherNode =>
             otherNode.type === nodeType &&
             otherNode.widgets[0].value === widgetValue
-        );
+        ) || null;
     }
 };
 
