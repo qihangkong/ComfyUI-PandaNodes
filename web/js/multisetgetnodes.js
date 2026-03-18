@@ -372,6 +372,15 @@ app.registerExtension({
                 this.validateName(graph);
             }
 
+            // 自定义序列化钩子：保存 inputs 上的 _fieldId 属性
+            _serialize() {
+                return {
+                    inputs: this.inputs.map(input => ({
+                        _fieldId: input._fieldId
+                    }))
+                };
+            }
+
             configure(data) {
                 // Mark that we're in configuration phase to prevent side effects
                 this._isConfiguring = true;
@@ -379,7 +388,16 @@ app.registerExtension({
                 const result = super.configure(data);
 
                 // After configuration is loaded, restore the field IDs on inputs
-                // We need to match existing fields from properties with inputs
+                // First try to restore from _serialize data (exact matches)
+                if (data.inputs) {
+                    data.inputs.forEach((savedInput, index) => {
+                        if (this.inputs[index] && savedInput._fieldId) {
+                            this.inputs[index]._fieldId = savedInput._fieldId;
+                        }
+                    });
+                }
+
+                // Then fallback to matching existing fields from properties with inputs
                 if (this.properties && this.properties.fields) {
                     // 修复：清理 properties.fields 中的无效字段（fieldId为 null/undefined/''/'undefined'）
                     const validFields = {};
@@ -398,15 +416,20 @@ app.registerExtension({
 
                     const fieldIds = Object.keys(this.properties.fields);
                     fieldIds.forEach((fieldId, index) => {
-                        if (this.inputs[index]) {
+                        // Only set fieldId if we don't have it already from _serialize
+                        if (this.inputs[index] && !this.inputs[index]._fieldId) {
                             this.inputs[index]._fieldId = fieldId;
                         }
                     });
                 }
 
-                // 关键修复：恢复字段重命名的 text widget（与 clone() 方法类似）
+                // 关键修复：完全同步 widgets 与 properties.fields（与 clone() 方法类似）
                 // 前3个 widget 是固定的：name、+Add Field、-Remove Last（都是0-based）
-                if (this.widgets.length <= 3 && this.properties.fields) {
+                const preservedWidgets = this.widgets.slice(0, 3);
+                this.widgets.length = 0;
+                preservedWidgets.forEach(w => this.widgets.push(w));
+
+                if (this.properties.fields) {
                     const fieldIds = Object.keys(this.properties.fields);
                     fieldIds.forEach((fieldId, index) => {
                         const fieldData = this.properties.fields[fieldId];
@@ -904,9 +927,30 @@ app.registerExtension({
                 }
             }
 
+            _serialize() {
+                console.log("[MultiGetNode DEBUG] _serialize() called, saving", this.outputs.length, "outputs");
+                return {
+                    outputs: this.outputs.map(output => ({
+                        _fieldId: output._fieldId,
+                        name: output.name
+                    }))
+                };
+            }
+
             configure(data) {
                 // 关键：在调用任何可能触发 updateFields() 的操作之前，先设置 _isConfiguring！
                 this._isConfiguring = true;
+
+                // 输出完整 data 对象，用于调试
+                console.log("[MultiGetNode DEBUG] configure() full data:", data);
+                console.log("[MultiGetNode DEBUG] configure() data.keys:", Object.keys(data));
+                if (data._serialized) {
+                    console.log("[MultiGetNode DEBUG] configure() data._serialized:", data._serialized);
+                    if (data._serialized.outputs) {
+                        console.log("[MultiGetNode DEBUG] configure() data._serialized.outputs.length:", data._serialized.outputs.length);
+                        console.log("[MultiGetNode DEBUG] configure() data._serialized.outputs:", data._serialized.outputs);
+                    }
+                }
 
                 console.log("[MultiGetNode DEBUG] configure() called", {
                     nodeTitle: this.title,
@@ -918,7 +962,15 @@ app.registerExtension({
                 });
 
                 // 保存原始配置数据中的 outputs，用于恢复 fieldId
-                const savedOutputs = data.outputs ? JSON.parse(JSON.stringify(data.outputs)) : [];
+                // 首先检查 data._serialized 或 data.outputs 中是否有保存的 _fieldId
+                let savedOutputs = [];
+                if (data.outputs) {
+                    savedOutputs = data.outputs.map((o, i) => ({
+                        name: o.name,
+                        _fieldId: (data.outputs && data.outputs[i] && data.outputs[i]._fieldId) ||
+                                  (data._serialized && data._serialized.outputs && data._serialized.outputs[i] && data._serialized.outputs[i]._fieldId)
+                    }));
+                }
 
                 // 先调用 super.configure() 恢复基本状态
                 const result = super.configure(data);
@@ -967,17 +1019,17 @@ app.registerExtension({
                                 this.title = "Get_" + this.currentSetter.widgets[0].value;
 
                                 if (allFieldIdsRestored) {
-                                    
+
                                 } else {
                                     // 如果 fieldId 恢复失败，直接调用 updateFields()，它能正确处理
-                                    
+
                                     this.updateFields(this.currentSetter.properties.fields);
                                 }
                             }
                         }, 200);
                     }
                 } else {
-                    
+
                     setTimeout(() => {
                         if (!this._configureTimeout) {
                             this._isConfiguring = false;
