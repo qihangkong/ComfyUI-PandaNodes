@@ -915,15 +915,38 @@ app.registerExtension({
                 }
 
                 cloned.currentSetter = null;
+                cloned._isConfiguring = false; // 关键修复：确保克隆节点的配置标志是 false
                 cloned.size = cloned.computeSize();
+
+                console.log("[MultiGetNode DEBUG] clone() completed", {
+                    originalTitle: this.title,
+                    clonedTitle: cloned.title,
+                    nodeId: cloned.id,
+                    _isConfiguring: cloned._isConfiguring
+                });
                 return cloned;
             }
 
             onAdded(graph) {
+                console.log("[MultiGetNode DEBUG] onAdded() called", {
+                    nodeTitle: this.title,
+                    nodeId: this.id,
+                    hasGraph: !!graph,
+                    _isConfiguring: this._isConfiguring,
+                    widgetValue: this.widgets && this.widgets[0] ? this.widgets[0].value : null
+                });
+
                 // When node is added to graph (including after cloning),
                 // update fields if we have a selected group
                 if (this.widgets && this.widgets.length > 0 && this.widgets[0] && this.widgets[0].value) {
+                    // 关键修复：在 onAdded() 中，临时覆盖 _isConfiguring 标志，确保克隆后能立即同步字段
+                    const savedIsConfiguring = this._isConfiguring;
+                    this._isConfiguring = false;
+
                     this.onGroupChange();
+
+                    // 恢复原始标志
+                    this._isConfiguring = savedIsConfiguring;
                 }
             }
 
